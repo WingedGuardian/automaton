@@ -584,4 +584,20 @@ describe("UnifiedInferenceClient", () => {
       client.chat({ tier: "reasoning", messages: BASE_MESSAGES }),
     ).rejects.toThrow(/All providers failed/);
   });
+
+  it("cascades to next provider on 413 request too large without retrying", async () => {
+    const client = createClient();
+
+    // First provider (openai) returns 413 — context too large for provider's TPM tier
+    queueError(413, "Request too large");
+    // Second provider (groq) succeeds
+    queueCompletion({ content: "groq response after 413" });
+
+    const result = await client.chat({ tier: "reasoning", messages: BASE_MESSAGES });
+
+    expect(result.content).toBe("groq response after 413");
+    expect(result.metadata.failedProviders).toContain("openai");
+    const openaiCalls = mockState.calls.filter((c: any) => c._providerHint === "openai");
+    expect(openaiCalls.length).toBeLessThanOrEqual(1);
+  });
 });

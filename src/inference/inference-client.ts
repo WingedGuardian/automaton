@@ -204,8 +204,10 @@ export class UnifiedInferenceClient {
           });
         }
 
-        // 404 = model_not_found: no point retrying the same provider — cascade immediately
-        if (getStatusCode(error) === 404) {
+        // 404 = model_not_found, 413 = request too large: provider-specific limits,
+        // no point retrying the same provider — cascade immediately to next.
+        const sc = getStatusCode(error);
+        if (sc === 404 || sc === 413) {
           throw new ProviderAttemptError({
             providerId: resolved.provider.id,
             retries,
@@ -423,8 +425,8 @@ export class UnifiedInferenceClient {
   private isRetryableError(error: unknown): boolean {
     const status = getStatusCode(error);
     if (status === undefined) return false;
-    // 404 = model_not_found: provider-specific, cascade to next provider
-    if (status === 404) return true;
+    // 404 = model_not_found, 413 = request too large: provider-specific, cascade to next
+    if (status === 404 || status === 413) return true;
     return RETRYABLE_STATUS_CODES.has(status);
   }
 
