@@ -37,10 +37,12 @@ export function createJintelAgentTools(): AutomatonTool[] {
   // live tool set bound to the calling automaton's wallet on every call.
   const shapeDefs = createJintelTools({ client: undefined });
   return shapeDefs.map((def) => {
-    const schema = zodToJsonSchema(def.parameters, { target: "openApi3" }) as Record<
+    const rawSchema = zodToJsonSchema(def.parameters, { target: "jsonSchema7" }) as Record<
       string,
       unknown
     >;
+    // Strip $schema — LLM APIs reject it; use numeric exclusiveMinimum (draft-07 style)
+    const { $schema: _unused, ...schema } = rawSchema;
     if (!schema.type) schema.type = "object";
     if (!schema.properties) schema.properties = {};
 
