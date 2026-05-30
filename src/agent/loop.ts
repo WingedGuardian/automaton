@@ -23,6 +23,7 @@ import type {
   SpendTrackerInterface,
   InputSource,
   ModelStrategyConfig,
+  ChatMessage,
 } from "../types.js";
 import { DEFAULT_MODEL_STRATEGY_CONFIG } from "../types.js";
 import type { PolicyEngine } from "./policy-engine.js";
@@ -62,7 +63,7 @@ import { LocalWorkerPool } from "../orchestration/local-worker.js";
 import { SimpleAgentTracker, SimpleFundingProtocol } from "../orchestration/simple-tracker.js";
 import { HarnessRegistry } from "./harness-registry.js";
 import { createWorkerInferenceBridge } from "./worker-inference-bridge.js";
-import { ProviderRegistry } from "../inference/provider-registry.js";
+import { ProviderRegistry, type ModelTier } from "../inference/provider-registry.js";
 import { UnifiedInferenceClient } from "../inference/inference-client.js";
 import { isIdleOnlyTool } from "./idle-only-tools.js";
 
@@ -128,6 +129,7 @@ export async function runAgentLoop(
   let planModeController: PlanModeController | undefined;
   let orchestrator: Orchestrator | undefined;
   let workerPool: LocalWorkerPool | undefined;
+  let unifiedInference: UnifiedInferenceClient | undefined;
 
   if (hasTable(db.raw, "goals")) {
     try {
@@ -169,7 +171,7 @@ export async function runAgentLoop(
         registry.overrideBaseUrl("openai", process.env.OPENAI_BASE_URL);
       }
 
-      const unifiedInference = new UnifiedInferenceClient(registry);
+      unifiedInference = new UnifiedInferenceClient(registry);
       const agentTracker = new SimpleAgentTracker(db);
       const funding = new SimpleFundingProtocol(conway, identity, db);
       const messaging = new ColonyMessaging(
@@ -609,7 +611,33 @@ export async function runAgentLoop(
           turnId: ulid(),
           tools: inferenceTools,
         },
-        (msgs, opts) => inference.chat(msgs, { ...opts, tools: inferenceTools }),
+        async (msgs, opts) => {
+          if (!unifiedInference) {
+            return inference.chat(msgs, { ...opts, tools: inferenceTools });
+          }
+          // Use UnifiedInferenceClient so the call cascades across providers
+          // (Conway → Groq → OpenRouter) instead of hard-failing on one.
+          const modelTier: ModelTier =
+            survivalTier === "high" ? "reasoning" :
+            survivalTier === "normal" ? "fast" : "cheap";
+          const unified = await unifiedInference.chat({
+            messages: msgs as ChatMessage[],
+            tier: modelTier,
+            maxTokens: (opts as any)?.maxTokens,
+            temperature: (opts as any)?.temperature,
+            tools: (opts as any)?.tools,
+          });
+          return {
+            message: { content: unified.content, role: "assistant" as const },
+            toolCalls: unified.toolCalls,
+            usage: {
+              promptTokens: unified.usage.inputTokens,
+              completionTokens: unified.usage.outputTokens,
+              totalTokens: unified.usage.totalTokens,
+            },
+            finishReason: "stop" as const,
+          };
+        },
       );
 
       // Build a compatible response for the rest of the loop
