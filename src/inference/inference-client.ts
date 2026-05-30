@@ -68,12 +68,14 @@ class ProviderAttemptError extends Error {
   readonly providerId: string;
   readonly retries: number;
   readonly retryable: boolean;
+  readonly countAsFailure: boolean;
   readonly originalError: unknown;
 
   constructor(params: {
     providerId: string;
     retries: number;
     retryable: boolean;
+    countAsFailure: boolean;
     originalError: unknown;
   }) {
     const message =
@@ -85,6 +87,7 @@ class ProviderAttemptError extends Error {
     this.providerId = params.providerId;
     this.retries = params.retries;
     this.retryable = params.retryable;
+    this.countAsFailure = params.countAsFailure;
     this.originalError = params.originalError;
   }
 }
@@ -132,7 +135,9 @@ export class UnifiedInferenceClient {
 
         totalRetries += error.retries;
         failedProviders.push(resolved.provider.id);
-        this.markProviderFailure(resolved.provider.id);
+        if (error.countAsFailure) {
+          this.markProviderFailure(resolved.provider.id);
+        }
 
         if (error.retryable) {
           continue;
@@ -200,18 +205,21 @@ export class UnifiedInferenceClient {
             providerId: resolved.provider.id,
             retries,
             retryable: false,
+            countAsFailure: true,
             originalError: error,
           });
         }
 
         // 404 = model_not_found, 413 = request too large: provider-specific limits,
         // no point retrying the same provider — cascade immediately to next.
+        // These are NOT provider health failures; don't count toward circuit breaker.
         const sc = getStatusCode(error);
         if (sc === 404 || sc === 413) {
           throw new ProviderAttemptError({
             providerId: resolved.provider.id,
             retries,
             retryable: true,
+            countAsFailure: false,
             originalError: error,
           });
         }
@@ -221,6 +229,7 @@ export class UnifiedInferenceClient {
             providerId: resolved.provider.id,
             retries,
             retryable: true,
+            countAsFailure: true,
             originalError: error,
           });
         }
@@ -562,7 +571,7 @@ function getStatusCode(error: unknown): number | undefined {
   }
 
   if (typeof candidate.message === "string") {
-    const match = candidate.message.match(/\b(429|500|503)\b/);
+    const match = candidate.message.match(/\b(404|413|429|500|503)\b/);
     if (match) {
       return Number(match[1]);
     }

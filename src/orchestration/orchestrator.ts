@@ -546,6 +546,7 @@ export class Orchestrator {
               recoveryCount,
             });
             failTask(this.params.db, task.id, `Worker died ${recoveryCount} times — task abandoned`, false);
+            this.clearRecoveryCount(task.id);
             counters.tasksFailed += 1;
             continue;
           }
@@ -663,6 +664,7 @@ export class Orchestrator {
       if (event.result.success) {
         try {
           completeTask(this.params.db, taskRow.id, event.result);
+          this.clearRecoveryCount(taskRow.id);
           counters.tasksCompleted += 1;
 
           if (taskRow.assignedTo) {
@@ -1077,6 +1079,10 @@ export class Orchestrator {
     this.params.db.prepare(
       "INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)",
     ).run(key, String(current + 1));
+  }
+
+  private clearRecoveryCount(taskId: string): void {
+    this.params.db.prepare("DELETE FROM kv WHERE key = ?").run(this.staleRecoveryKey(taskId));
   }
 }
 

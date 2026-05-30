@@ -635,7 +635,9 @@ export async function runAgentLoop(
               completionTokens: unified.usage.outputTokens,
               totalTokens: unified.usage.totalTokens,
             },
-            finishReason: "stop" as const,
+            finishReason: (unified.toolCalls && unified.toolCalls.length > 0
+              ? "tool_calls"
+              : "stop") as "stop" | "tool_calls",
           };
         },
       );

@@ -3363,6 +3363,15 @@ Model: ${ctx.inference.getDefaultModel()}
         const link = args.delivery_link as string;
         const desc = args.delivery_description as string;
 
+        try {
+          const parsed = new URL(link);
+          if (!["http:", "https:"].includes(parsed.protocol)) {
+            return `delivery_link must be an http or https URL, got: ${parsed.protocol}`;
+          }
+        } catch {
+          return `delivery_link is not a valid URL: ${link}`;
+        }
+
         // Verify the agent owns this claim before submitting
         const task = await getTaskDetail(taskId);
         if (task.worker_address?.toLowerCase() !== ctx.identity.account.address.toLowerCase()) {
