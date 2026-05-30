@@ -553,4 +553,35 @@ describe("UnifiedInferenceClient", () => {
     });
     expect(Array.isArray(payload.tools)).toBe(true);
   });
+
+  it("cascades to next provider on 404 model_not_found without retrying", async () => {
+    const client = createClient();
+
+    // First provider (openai) returns 404 — model deprecated/not found
+    queueError(404, "model_not_found");
+    // Second provider (groq) succeeds
+    queueCompletion({ content: "groq response" });
+
+    const result = await client.chat({ tier: "reasoning", messages: BASE_MESSAGES });
+
+    // Should succeed using the fallback provider
+    expect(result.content).toBe("groq response");
+    // openai should be in the failed list
+    expect(result.metadata.failedProviders).toContain("openai");
+    // Only one request should have been made to openai (no retries)
+    const openaiCalls = mockState.calls.filter((c: any) => c._providerHint === "openai");
+    expect(openaiCalls.length).toBeLessThanOrEqual(1);
+  });
+
+  it("404 does not cascade when no fallback provider exists", async () => {
+    const client = createClient();
+
+    // Both providers return 404
+    queueError(404, "openai-model-gone");
+    queueError(404, "groq-model-gone");
+
+    await expect(
+      client.chat({ tier: "reasoning", messages: BASE_MESSAGES }),
+    ).rejects.toThrow(/All providers failed/);
+  });
 });
