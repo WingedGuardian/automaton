@@ -204,6 +204,16 @@ export class UnifiedInferenceClient {
           });
         }
 
+        // 404 = model_not_found: no point retrying the same provider — cascade immediately
+        if (getStatusCode(error) === 404) {
+          throw new ProviderAttemptError({
+            providerId: resolved.provider.id,
+            retries,
+            retryable: true,
+            originalError: error,
+          });
+        }
+
         if (retries >= RETRY_BACKOFF_MS.length) {
           throw new ProviderAttemptError({
             providerId: resolved.provider.id,
@@ -412,7 +422,10 @@ export class UnifiedInferenceClient {
 
   private isRetryableError(error: unknown): boolean {
     const status = getStatusCode(error);
-    return status !== undefined && RETRYABLE_STATUS_CODES.has(status);
+    if (status === undefined) return false;
+    // 404 = model_not_found: provider-specific, cascade to next provider
+    if (status === 404) return true;
+    return RETRYABLE_STATUS_CODES.has(status);
   }
 
   private isProviderCircuitOpen(providerId: string): boolean {
